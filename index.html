@@ -379,7 +379,7 @@
                             <i class="fa-solid fa-images text-2xl"></i>
                         </div>
                         <p class="text-slate-800 font-bold text-base pointer-events-none">Ketuk untuk pilih foto dari HP kamu</p>
-                        <p class="text-slate-500 text-xs mt-1 pointer-events-none">JPG, PNG, WEBP • Maks 15MB per foto • Bisa pilih banyak sekaligus</p>
+                        <p class="text-slate-500 text-xs mt-1 pointer-events-none">JPG, PNG, WEBP • Maks 15MB per foto • Bisa pilih banyak sekaligus • Di HP foto ikut terkirim otomatis ke WA</p>
                         <div class="mt-4 flex flex-col sm:flex-row gap-2 justify-center">
                             <label for="file-input" class="px-5 py-3 rounded-xl bg-slate-900 text-white font-semibold text-sm hover:bg-slate-800 transition cursor-pointer text-center">Pilih Dari Galeri</label>
                             <label for="file-camera" class="px-5 py-3 rounded-xl bg-white border border-slate-300 text-slate-700 font-semibold text-sm hover:bg-slate-100 transition cursor-pointer text-center">Ambil Foto Kamera</label>
@@ -760,8 +760,10 @@
             });
         });
 
-        // Submit -> validasi + kirim ringkasan ke WhatsApp toko
-        orderForm.addEventListener('submit', (e) => {
+        // Submit -> validasi + kirim foto + teks ke WhatsApp toko
+        // Catatan: link wa.me TIDAK bisa melampirkan file otomatis.
+        // Jadi di HP kita pakai Web Share API agar foto ikut terkirim ke WA.
+        orderForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             showFormError('');
             if (selectedFiles.length === 0) {
@@ -787,19 +789,37 @@
                 `Jumlah file foto: ${selectedFiles.length} (${selectedFiles.map(f => f.name).join(', ').slice(0, 300)})\n` +
                 `Ukuran: ${sizeText}\nJml per foto: ${photoQtyEl.value}\nKertas: ${paperText}\n` +
                 `Pengiriman: ${shipText}\nPembayaran: ${payment.toUpperCase()}\n` +
-                `Total: ${totalEl.innerText}\n(Foto asli dikirim manual via chat ini ya)`;
+                `Total: ${totalEl.innerText}`;
             try { localStorage.setItem('last-order-id', orderId); } catch (err) {}
-            const waUrl = 'https://wa.me/6281999287230?text=' + encodeURIComponent(msg);
-            // Pakai <a> sementara agar tidak diblokir popup-blocker di HP
-            const a = document.createElement('a');
-            a.href = waUrl;
-            a.target = '_blank';
-            a.rel = 'noopener';
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => { window.location.href = waUrl; }, 600);
             document.getElementById('tracking-id').value = orderId;
             checkStatus();
+
+            const waUrl = 'https://wa.me/6281999287230?text=' + encodeURIComponent(msg);
+            const openWA = () => {
+                const a = document.createElement('a');
+                a.href = waUrl;
+                a.target = '_blank';
+                a.rel = 'noopener';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            };
+
+            // 1) HP (Android/iOS): share file + teks langsung ke WA
+            if (navigator.canShare && navigator.share) {
+                try {
+                    if (navigator.canShare({ files: selectedFiles })) {
+                        await navigator.share({ files: selectedFiles, title: 'Pesanan ' + orderId, text: msg });
+                        return; // sukses dishare ke WA, selesai
+                    }
+                } catch (err) {
+                    if (err && err.name === 'AbortError') return; // user batalkan share
+                    // gagal -> lanjut fallback di bawah
+                }
+            }
+            // 2) Laptop/desktop: wa.me tidak bisa bawa file, buka chat teks + user kirim foto manual
+            openWA();
+            showFormError('Chat WhatsApp terbuka tanpa foto (keterbatasan wa.me). Lanjutkan kirim ' + selectedFiles.length + ' foto manual di chat tersebut ya.');
         });
 
         renderPreviews();
