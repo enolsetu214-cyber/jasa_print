@@ -406,6 +406,23 @@
                     </h3>
 
                     <form id="order-form" class="space-y-4">
+                        <!-- Ukuran Cetak -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label for="photo-size" class="block text-xs font-bold text-slate-700 uppercase mb-2">Ukuran Cetak</label>
+                                <select id="photo-size" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500 text-sm font-medium">
+                                    <option value="1000">2R / Polaroid — Rp 1.000</option>
+                                    <option value="3500" selected>4R Standard — Rp 3.500</option>
+                                    <option value="15000">Paket Pas Foto — Rp 15.000</option>
+                                    <option value="20000">10R / Jumbo — Rp 20.000</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="photo-qty" class="block text-xs font-bold text-slate-700 uppercase mb-2">Jml / Foto</label>
+                                <input type="number" id="photo-qty" min="1" max="1000" value="1" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500 text-sm font-medium">
+                            </div>
+                        </div>
+                        <p id="price-hint" class="text-[11px] text-slate-500 -mt-2">Subtotal = jumlah foto × harga ukuran × jumlah per foto.</p>
                         <!-- Jenis Kertas -->
                         <div>
                             <label class="block text-xs font-bold text-slate-700 uppercase mb-2">Jenis Kertas Foto</label>
@@ -430,9 +447,9 @@
                         <!-- Data Pemesan -->
                         <div class="space-y-3 pt-2">
                             <label class="block text-xs font-bold text-slate-700 uppercase">Data Pemesan</label>
-                            <input type="text" placeholder="Nama Lengkap Anda" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                            <input type="tel" value="081999287230" placeholder="Nomor WhatsApp (Contoh: 081999287230)" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                            <textarea rows="2" placeholder="Alamat Pengiriman Lengkap" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">Jalan Udayana Kost Ceprido</textarea>
+                            <input type="text" id="cust-name" placeholder="Nama Lengkap Anda" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                            <input type="tel" id="cust-wa" value="" placeholder="Nomor WhatsApp (Contoh: 081999287230)" required pattern="[0-9+ ]{9,16}" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                            <textarea rows="2" id="cust-address" placeholder="Alamat Pengiriman Lengkap" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">Jalan Udayana Kost Ceprido</textarea>
                         </div>
 
                         <!-- Metode Pembayaran -->
@@ -589,6 +606,168 @@
                 alert("Silakan masukkan ID Pesanan Anda.");
             }
         }
+
+        // ===== Upload Foto + Hitung Total + Checkout via WhatsApp =====
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('file-input');
+        const previewList = document.getElementById('file-preview-list');
+        const fileCountEl = document.getElementById('file-count');
+        const clearAllBtn = document.getElementById('clear-all');
+        const photoSizeEl = document.getElementById('photo-size');
+        const photoQtyEl = document.getElementById('photo-qty');
+        const shippingEl = document.getElementById('shipping-method');
+        const subtotalEl = document.getElementById('subtotal-text');
+        const shippingTextEl = document.getElementById('shipping-text');
+        const totalEl = document.getElementById('total-text');
+        const orderForm = document.getElementById('order-form');
+
+        const MAX_SIZE = 15 * 1024 * 1024; // 15MB
+        let selectedFiles = [];
+
+        const formatIDR = (n) => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
+        const formatSize = (bytes) => bytes > 1048576
+            ? (bytes / 1048576).toFixed(1) + ' MB'
+            : Math.max(1, Math.round(bytes / 1024)) + ' KB';
+
+        function updateTotal() {
+            const price = parseInt(photoSizeEl.value, 10) || 0;
+            const qty = Math.max(1, parseInt(photoQtyEl.value, 10) || 1);
+            const shipping = parseInt(shippingEl.value, 10) || 0;
+            const subtotal = selectedFiles.length * price * qty;
+            subtotalEl.innerText = formatIDR(subtotal);
+            shippingTextEl.innerText = formatIDR(shipping);
+            totalEl.innerText = formatIDR(subtotal + shipping);
+        }
+
+        function renderPreviews() {
+            fileCountEl.innerText = selectedFiles.length;
+            clearAllBtn.classList.toggle('hidden', selectedFiles.length === 0);
+
+            if (selectedFiles.length === 0) {
+                previewList.innerHTML = `
+                    <div class="text-center py-8 text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
+                        <i class="fa-regular fa-folder-open text-3xl mb-2 block"></i>
+                        <span class="text-xs">Belum ada foto yang dipilih.</span>
+                    </div>`;
+                updateTotal();
+                return;
+            }
+
+            previewList.innerHTML = '';
+            selectedFiles.forEach((file, idx) => {
+                const url = URL.createObjectURL(file);
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl p-2.5';
+                row.innerHTML = `
+                    <img src="${url}" alt="${file.name.replace(/"/g, '')}" class="w-14 h-14 rounded-lg object-cover border border-slate-200 flex-shrink-0">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs font-bold text-slate-800 truncate">${file.name.replace(/</g, '&lt;')}</p>
+                        <p class="text-[11px] text-slate-500">${formatSize(file.size)}</p>
+                    </div>
+                    <button type="button" data-idx="${idx}" class="remove-btn w-8 h-8 rounded-lg bg-rose-100 text-rose-600 hover:bg-rose-200 flex items-center justify-center flex-shrink-0" title="Hapus foto">
+                        <i class="fa-solid fa-trash-can text-xs"></i>
+                    </button>`;
+                previewList.appendChild(row);
+            });
+
+            previewList.querySelectorAll('.remove-btn').forEach((btn) => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    selectedFiles.splice(parseInt(btn.dataset.idx, 10), 1);
+                    renderPreviews();
+                });
+            });
+            updateTotal();
+        }
+
+        function addFiles(fileList) {
+            let rejected = 0;
+            Array.from(fileList).forEach((file) => {
+                if (!file.type.startsWith('image/')) { rejected++; return; }
+                if (file.size > MAX_SIZE) { rejected++; return; }
+                // Hindari duplikat nama+ukuran yang sama
+                const exists = selectedFiles.some((f) => f.name === file.name && f.size === file.size);
+                if (!exists) selectedFiles.push(file);
+            });
+            if (rejected > 0) alert(rejected + ' file ditolak: harus gambar JPG/PNG/WEBP maksimal 15MB.');
+            fileInput.value = ''; // reset agar file yang sama bisa dipilih lagi
+            renderPreviews();
+        }
+
+        // Klik area dropzone -> buka dialog file (kecuali klik tombol hapus)
+        dropzone.addEventListener('click', (e) => {
+            if (e.target.closest('.remove-btn')) return;
+            fileInput.click();
+        });
+        dropzone.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+        });
+        fileInput.addEventListener('change', (e) => addFiles(e.target.files));
+
+        // Drag & drop
+        ['dragenter', 'dragover'].forEach((evt) => dropzone.addEventListener(evt, (e) => {
+            e.preventDefault();
+            dropzone.classList.add('border-brand-500', 'bg-brand-50/50');
+        }));
+        ['dragleave', 'drop'].forEach((evt) => dropzone.addEventListener(evt, (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('border-brand-500', 'bg-brand-50/50');
+        }));
+        dropzone.addEventListener('drop', (e) => {
+            if (e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+        });
+
+        clearAllBtn.addEventListener('click', () => {
+            selectedFiles = [];
+            renderPreviews();
+        });
+
+        [photoSizeEl, photoQtyEl, shippingEl].forEach((el) => el.addEventListener('change', updateTotal));
+        photoQtyEl.addEventListener('input', updateTotal);
+
+        // Tombol "Pilih Ukuran Ini" di katalog langsung set dropdown ukuran
+        document.querySelectorAll('#catalog-grid a[href="#pemesanan"]').forEach((link, i) => {
+            link.addEventListener('click', () => {
+                const prices = ['1000', '3500', '15000', '20000'];
+                if (prices[i]) { photoSizeEl.value = prices[i]; updateTotal(); }
+            });
+        });
+
+        // Submit -> validasi + kirim ringkasan ke WhatsApp toko
+        orderForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (selectedFiles.length === 0) {
+                alert('Silakan upload minimal 1 foto dulu.');
+                document.getElementById('pemesanan').scrollIntoView({ behavior: 'smooth' });
+                return;
+            }
+            const name = document.getElementById('cust-name').value.trim();
+            const wa = document.getElementById('cust-wa').value.trim();
+            const address = document.getElementById('cust-address').value.trim();
+            if (!name || !wa || !address) {
+                alert('Lengkapi Nama, No. WhatsApp, dan Alamat dulu.');
+                return;
+            }
+            const sizeText = photoSizeEl.options[photoSizeEl.selectedIndex].text;
+            const paperText = document.getElementById('paper-type').options[document.getElementById('paper-type').selectedIndex].text;
+            const shipText = shippingEl.options[shippingEl.selectedIndex].text;
+            const payment = (orderForm.querySelector('input[name="payment"]:checked') || {}).value || 'qris';
+            const orderId = 'PK-' + Math.floor(10000 + Math.random() * 90000);
+            const msg =
+                `Halo PrintKita! Saya mau cetak foto.\n` +
+                `ID: ${orderId}\nNama: ${name}\nWA: ${wa}\nAlamat: ${address}\n` +
+                `Jumlah file foto: ${selectedFiles.length} (${selectedFiles.map(f => f.name).join(', ').slice(0, 300)})\n` +
+                `Ukuran: ${sizeText}\nJml per foto: ${photoQtyEl.value}\nKertas: ${paperText}\n` +
+                `Pengiriman: ${shipText}\nPembayaran: ${payment.toUpperCase()}\n` +
+                `Total: ${totalEl.innerText}\n(Foto asli dikirim manual via chat ini ya)`;
+            try { localStorage.setItem('last-order-id', orderId); } catch (err) {}
+            window.open('https://wa.me/6281999287230?text=' + encodeURIComponent(msg), '_blank');
+            alert(`Pesanan ${orderId} dibuat! Lanjut kirim foto asli via WhatsApp yang terbuka.`);
+            document.getElementById('tracking-id').value = orderId;
+            checkStatus();
+        });
+
+        renderPreviews();
     </script>
 </body>
 </html>
