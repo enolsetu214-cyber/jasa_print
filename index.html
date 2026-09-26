@@ -526,33 +526,35 @@
                 </button>
             </div>
 
-            <!-- Status Result Display Mock -->
+            <!-- Status Result Display -->
             <div id="tracking-result" class="mt-8 bg-slate-800 rounded-2xl p-6 border border-slate-700 hidden">
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-700 pb-4 gap-2">
                     <div>
                         <span class="text-xs text-slate-400">ID Pesanan:</span>
                         <h4 class="text-lg font-bold text-white" id="res-id">PK-88231</h4>
+                        <p id="res-detail" class="text-xs text-slate-400 mt-1"></p>
                     </div>
-                    <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold px-3 py-1 rounded-full">Sedang Dicetak</span>
+                    <span id="res-status" class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold px-3 py-1 rounded-full">Diterima</span>
                 </div>
+                <p id="res-notfound" class="hidden mt-4 text-xs text-amber-300">ID tidak ditemukan di HP ini. Pesanan tersimpan di browser saat checkout. Pastikan cek dari HP yang sama atau tanya via WhatsApp.</p>
 
                 <!-- Timeline Process -->
-                <div class="mt-6 grid grid-cols-4 gap-2 text-center text-xs">
-                    <div class="space-y-1">
-                        <div class="w-8 h-8 rounded-full bg-emerald-500 text-slate-900 flex items-center justify-center mx-auto font-bold"><i class="fa-solid fa-check"></i></div>
-                        <p class="font-bold text-white">Diterima</p>
+                <div id="res-timeline" class="mt-6 grid grid-cols-4 gap-2 text-center text-xs">
+                    <div class="space-y-1" data-step="0">
+                        <div class="dot w-8 h-8 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center mx-auto font-bold">1</div>
+                        <p class="lbl text-slate-500">Diterima</p>
                     </div>
-                    <div class="space-y-1">
-                        <div class="w-8 h-8 rounded-full bg-brand-500 text-white flex items-center justify-center mx-auto font-bold"><i class="fa-solid fa-spinner animate-spin"></i></div>
-                        <p class="font-bold text-white">Cetak</p>
+                    <div class="space-y-1" data-step="1">
+                        <div class="dot w-8 h-8 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center mx-auto font-bold">2</div>
+                        <p class="lbl text-slate-500">Cetak</p>
                     </div>
-                    <div class="space-y-1">
-                        <div class="w-8 h-8 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center mx-auto font-bold">3</div>
-                        <p class="text-slate-500">Packing</p>
+                    <div class="space-y-1" data-step="2">
+                        <div class="dot w-8 h-8 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center mx-auto font-bold">3</div>
+                        <p class="lbl text-slate-500">Packing</p>
                     </div>
-                    <div class="space-y-1">
-                        <div class="w-8 h-8 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center mx-auto font-bold">4</div>
-                        <p class="text-slate-500">Dikirim</p>
+                    <div class="space-y-1" data-step="3">
+                        <div class="dot w-8 h-8 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center mx-auto font-bold">4</div>
+                        <p class="lbl text-slate-500">Dikirim</p>
                     </div>
                 </div>
             </div>
@@ -601,16 +603,72 @@
             mobileMenu.classList.toggle('hidden');
         });
 
-        // Simple Tracking Toggle
+        // ===== Lacak pesanan (data asli dari localStorage) =====
+        function getOrders() {
+            try { return JSON.parse(localStorage.getItem('printkita-orders') || '[]'); }
+            catch (err) { return []; }
+        }
+        function saveOrder(order) {
+            try {
+                const arr = getOrders();
+                arr.unshift(order);
+                localStorage.setItem('printkita-orders', JSON.stringify(arr.slice(0, 50)));
+                localStorage.setItem('last-order-id', order.id);
+            } catch (err) {}
+        }
+        function orderStage(order) {
+            const ageMin = (Date.now() - order.time) / 60000;
+            if (ageMin < 10) return 0;      // Diterima
+            if (ageMin < 120) return 1;     // Cetak
+            if (ageMin < 1440) return 2;    // Packing
+            return 3;                       // Dikirim
+        }
+        const STAGE_NAMES = ['Diterima', 'Sedang Dicetak', 'Packing', 'Dikirim'];
+        function paintTimeline(stage) {
+            document.querySelectorAll('#res-timeline [data-step]').forEach((box) => {
+                const i = parseInt(box.dataset.step, 10);
+                const dot = box.querySelector('.dot');
+                const lbl = box.querySelector('.lbl');
+                if (i < stage) {
+                    dot.className = 'dot w-8 h-8 rounded-full bg-emerald-500 text-slate-900 flex items-center justify-center mx-auto font-bold';
+                    dot.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    lbl.className = 'lbl font-bold text-white';
+                } else if (i === stage) {
+                    dot.className = 'dot w-8 h-8 rounded-full bg-brand-500 text-white flex items-center justify-center mx-auto font-bold';
+                    dot.innerHTML = stage === 0 ? '<i class="fa-solid fa-check"></i>' : '<i class="fa-solid fa-spinner animate-spin"></i>';
+                    lbl.className = 'lbl font-bold text-white';
+                } else {
+                    dot.className = 'dot w-8 h-8 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center mx-auto font-bold';
+                    dot.innerText = String(i + 1);
+                    lbl.className = 'lbl text-slate-500';
+                }
+            });
+        }
         function checkStatus() {
-            const input = document.getElementById('tracking-id').value;
+            const input = document.getElementById('tracking-id').value.trim().toUpperCase();
             const res = document.getElementById('tracking-result');
-            if(input.trim() !== "") {
-                document.getElementById('res-id').innerText = input.toUpperCase();
-                res.classList.remove('hidden');
-            } else {
-                alert("Silakan masukkan ID Pesanan Anda.");
+            const notfound = document.getElementById('res-notfound');
+            if (input === '') {
+                showFormError('Masukkan ID Pesanan dulu.');
+                return;
             }
+            res.classList.remove('hidden');
+            document.getElementById('res-id').innerText = input;
+            const order = getOrders().find((o) => (o.id || '').toUpperCase() === input);
+            if (!order) {
+                document.getElementById('res-detail').innerText = '';
+                document.getElementById('res-status').innerText = 'Tidak Ditemukan';
+                notfound.classList.remove('hidden');
+                paintTimeline(0);
+                return;
+            }
+            notfound.classList.add('hidden');
+            const stage = orderStage(order);
+            document.getElementById('res-detail').innerText =
+                `${order.count} foto • ${order.size} • ${order.total} • ${new Date(order.time).toLocaleString('id-ID')}`;
+            document.getElementById('res-status').innerText = STAGE_NAMES[stage];
+            paintTimeline(stage);
+            res.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         // ===== Upload Foto + Hitung Total + Checkout via WhatsApp =====
@@ -791,6 +849,7 @@
                 `Pengiriman: ${shipText}\nPembayaran: ${payment.toUpperCase()}\n` +
                 `Total: ${totalEl.innerText}`;
             try { localStorage.setItem('last-order-id', orderId); } catch (err) {}
+            saveOrder({ id: orderId, name, wa: waRaw, address, count: selectedFiles.length, size: sizeText, paper: paperText, ship: shipText, payment: payment.toUpperCase(), total: totalEl.innerText, time: Date.now() });
             document.getElementById('tracking-id').value = orderId;
             checkStatus();
 
