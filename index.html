@@ -647,6 +647,19 @@
             });
         }
 
+        // Upload foto ke hosting gratis TANPA kunci (CORS terbuka untuk browser).
+        // tmpfiles.org: maks 100MB/file. Catatan: file kedaluwarsa ±1 jam,
+        // jadi toko harus unduh segera. Kalau butuh permanen, isi IMGBB_KEY.
+        async function uploadToTmpFiles(file) {
+            const small = await compressImage(file);
+            const fd = new FormData();
+            fd.append('file', small, small.name);
+            const r = await fetch('https://tmpfiles.org/api/v1/upload', { method: 'POST', body: fd });
+            const j = await r.json();
+            if (j.status !== true || !j.data || !j.data.url) throw new Error('Upload foto gagal');
+            return String(j.data.url).replace('https://tmpfiles.org/', 'https://tmpfiles.org/dl/');
+        }
+
         async function uploadToImgbb(file) {
             const small = await compressImage(file);
             const b64 = await fileToBase64(small);
@@ -971,32 +984,38 @@
             if (FONNTE_TOKEN) {
                 setLoading(true);
                 try {
-                    // Jalur A (paket Free): upload foto ke imgbb -> kirim teks+link (full otomatis)
-                    if (IMGBB_KEY) {
-                        const links = [];
-                        for (let i = 0; i < selectedFiles.length; i++) {
-                            setLoading(true);
-                            submitBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Upload foto ${i + 1}/${selectedFiles.length}...`;
-                            links.push(`${i + 1}. ${await uploadToImgbb(selectedFiles[i])}`);
+                    // Jalur A (full otomatis, jalan di paket Free):
+                    // upload foto -> kirim teks+link via Fonnte (teks jalan di Free).
+                    // Urutan hosting: tmpfiles (tanpa kunci) -> imgbb (kalau key diisi).
+                    const links = [];
+                    for (let i = 0; i < selectedFiles.length; i++) {
+                        setLoading(true);
+                        submitBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Upload foto ${i + 1}/${selectedFiles.length}...`;
+                        let url = '';
+                        try { url = await uploadToTmpFiles(selectedFiles[i]); }
+                        catch (err1) {
+                            if (!IMGBB_KEY) throw new Error('Upload foto gagal, coba lagi.');
+                            url = await uploadToImgbb(selectedFiles[i]);
                         }
-                        const msgFull = msg + `\nFoto (${links.length}):\n` + links.join('\n');
-                        const t = new FormData();
-                        t.append('target', TOKO_WA);
-                        t.append('message', msgFull);
-                        t.append('countryCode', '62');
-                        const r = await fetch('https://api.fonnte.com/send', {
-                            method: 'POST',
-                            headers: { 'Authorization': FONNTE_TOKEN },
-                            body: t
-                        });
-                        const j = await r.json();
-                        if (!j.status) throw new Error(j.reason || 'Gagal kirim via API');
-                        setLoading(false);
-                        showFormError('');
-                        alert(`Pesanan ${orderId} terkirim otomatis ke WA toko beserta ${links.length} link foto!`);
-                        return;
+                        links.push(`${i + 1}. ${url}`);
                     }
-                    // Jalur B (tanpa imgbb): coba kirim file langsung (butuh paket berbayar)
+                    const msgFull = msg + `\nFoto (${links.length}):\n` + links.join('\n');
+                    const t = new FormData();
+                    t.append('target', TOKO_WA);
+                    t.append('message', msgFull);
+                    t.append('countryCode', '62');
+                    const r = await fetch('https://api.fonnte.com/send', {
+                        method: 'POST',
+                        headers: { 'Authorization': FONNTE_TOKEN },
+                        body: t
+                    });
+                    const j = await r.json();
+                    if (!j.status) throw new Error(j.reason || 'Gagal kirim via API');
+                    setLoading(false);
+                    showFormError('');
+                    alert(`Pesanan ${orderId} terkirim otomatis ke WA toko beserta ${links.length} link foto!`);
+                    return;
+                    // Jalur B (cadangan): coba kirim file langsung (butuh paket berbayar)
                     const hasil = await sendViaFonnte(orderId, msg, selectedFiles);
                     setLoading(false);
                     showFormError('');
