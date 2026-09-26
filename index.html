@@ -603,12 +603,14 @@
             mobileMenu.classList.toggle('hidden');
         });
 
-        // ===== Konfigurasi API WhatsApp (Fonnte) =====
-        // Cara isi:
-        // 1. Daftar di https://fonnte.com, hubungkan nomor 085137373858 sebagai device.
-        // 2. Copy token dari dashboard, tempel di bawah ini.
-        // 3. Push ulang. Kalau kosong, otomatis pakai fallback Share/wa.me.
+        // ===== Konfigurasi API WhatsApp (Fonnte) + Hosting Foto (imgbb) =====
+        // Fonnte paket Free TIDAK bisa kirim file. Solusi: foto diupload ke imgbb,
+        // lalu link foto dikirim sebagai TEKS via Fonnte (teks jalan di Free).
+        // Cara isi IMGBB_KEY (gratis, 2 menit):
+        // 1. Buka https://api.imgbb.com, login/daftar, buat API key.
+        // 2. Tempel key di bawah ini, push ulang.
         const FONNTE_TOKEN = 'GkZoWv38sf1xdD9GMUi7';
+        const IMGBB_KEY = '';
         const TOKO_WA = '085137373858';
 
         // Kompres foto agar < 4MB (syarat file Fonnte)
@@ -636,7 +638,29 @@
             });
         }
 
-        async function sendViaFonnte(orderId, msg, files) {
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result).split(',')[1]);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function uploadToImgbb(file) {
+            const small = await compressImage(file);
+            const b64 = await fileToBase64(small);
+            const body = new URLSearchParams();
+            body.append('key', IMGBB_KEY);
+            body.append('image', b64);
+            body.append('name', file.name);
+            const r = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body });
+            const j = await r.json();
+            if (!j.success) throw new Error((j.error && j.error.message) || 'Upload foto gagal');
+            return j.data.display_url || j.data.url;
+        }
+
+        async function sendViaFonnte(orderId, msg, files, onProgress) {
             const sendOne = async (form) => {
                 const r = await fetch('https://api.fonnte.com/send', {
                     method: 'POST',
@@ -645,14 +669,18 @@
                 });
                 return r.json();
             };
-            // 1) kirim teks ringkasan dulu (jalan di paket Free)
-            const t = new FormData();
-            t.append('target', TOKO_WA);
-            t.append('message', msg);
-            t.append('countryCode', '62');
-            const resT = await sendOne(t);
-            if (!resT.status) throw new Error(resT.reason || 'Gagal kirim teks via API');
-            // 2) kirim tiap foto (BUTUH paket Super/Advanced/Ultra; Free ditolak API)
+            // 1) Jika IMGBB_KEY diisi: upload foto -> kirim TEKS+LINK via Fonnte.
+            //    Full otomatis, jalan di paket Free, tanpa Share manual.
+            if (IMGBB_KEY) {
+                const t = new FormData();
+                t.append('target', TOKO_WA);
+                t.append('message', msg);
+                t.append('countryCode', '62');
+                const resT = await sendOne(t);
+                if (!resT.status) throw new Error(resT.reason || 'Gagal kirim teks via API');
+                return { fotoOk: 0, fotoGagal: '', viaLink: true };
+            }
+            // 2) Tanpa imgbb: coba kirim file langsung (BUTUH paket Super/Advanced/Ultra; Free ditolak API)
             let fotoOk = 0, fotoGagal = '';
             for (let i = 0; i < files.length; i++) {
                 const small = await compressImage(files[i]);
@@ -943,6 +971,32 @@
             if (FONNTE_TOKEN) {
                 setLoading(true);
                 try {
+                    // Jalur A (paket Free): upload foto ke imgbb -> kirim teks+link (full otomatis)
+                    if (IMGBB_KEY) {
+                        const links = [];
+                        for (let i = 0; i < selectedFiles.length; i++) {
+                            setLoading(true);
+                            submitBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Upload foto ${i + 1}/${selectedFiles.length}...`;
+                            links.push(`${i + 1}. ${await uploadToImgbb(selectedFiles[i])}`);
+                        }
+                        const msgFull = msg + `\nFoto (${links.length}):\n` + links.join('\n');
+                        const t = new FormData();
+                        t.append('target', TOKO_WA);
+                        t.append('message', msgFull);
+                        t.append('countryCode', '62');
+                        const r = await fetch('https://api.fonnte.com/send', {
+                            method: 'POST',
+                            headers: { 'Authorization': FONNTE_TOKEN },
+                            body: t
+                        });
+                        const j = await r.json();
+                        if (!j.status) throw new Error(j.reason || 'Gagal kirim via API');
+                        setLoading(false);
+                        showFormError('');
+                        alert(`Pesanan ${orderId} terkirim otomatis ke WA toko beserta ${links.length} link foto!`);
+                        return;
+                    }
+                    // Jalur B (tanpa imgbb): coba kirim file langsung (butuh paket berbayar)
                     const hasil = await sendViaFonnte(orderId, msg, selectedFiles);
                     setLoading(false);
                     showFormError('');
