@@ -603,6 +603,67 @@
             mobileMenu.classList.toggle('hidden');
         });
 
+        // ===== Konfigurasi API WhatsApp (Fonnte) =====
+        // Cara isi:
+        // 1. Daftar di https://fonnte.com, hubungkan nomor 085137373858 sebagai device.
+        // 2. Copy token dari dashboard, tempel di bawah ini.
+        // 3. Push ulang. Kalau kosong, otomatis pakai fallback Share/wa.me.
+        const FONNTE_TOKEN = '';
+        const TOKO_WA = '085137373858';
+
+        // Kompres foto agar < 4MB (syarat file Fonnte)
+        function compressImage(file) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                const url = URL.createObjectURL(file);
+                img.onload = () => {
+                    const maxDim = 1280;
+                    let { width, height } = img;
+                    const scale = Math.min(1, maxDim / Math.max(width, height));
+                    width = Math.round(width * scale);
+                    height = Math.round(height * scale);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+                    URL.revokeObjectURL(url);
+                    canvas.toBlob((blob) => {
+                        resolve(blob ? new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }) : file);
+                    }, 'image/jpeg', 0.82);
+                };
+                img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+                img.src = url;
+            });
+        }
+
+        async function sendViaFonnte(orderId, msg, files) {
+            const sendOne = async (form) => {
+                const r = await fetch('https://api.fonnte.com/send', {
+                    method: 'POST',
+                    headers: { 'Authorization': FONNTE_TOKEN },
+                    body: form
+                });
+                return r.json();
+            };
+            // 1) kirim teks ringkasan dulu
+            const t = new FormData();
+            t.append('target', TOKO_WA);
+            t.append('message', msg);
+            t.append('countryCode', '62');
+            const resT = await sendOne(t);
+            if (!resT.status) throw new Error(resT.reason || 'Gagal kirim teks via API');
+            // 2) kirim tiap foto (kompres dulu)
+            for (let i = 0; i < files.length; i++) {
+                const small = await compressImage(files[i]);
+                const f = new FormData();
+                f.append('target', TOKO_WA);
+                f.append('message', `Foto ${i + 1}/${files.length} • ${orderId}`);
+                f.append('countryCode', '62');
+                f.append('file', small);
+                const resF = await sendOne(f);
+                if (!resF.status) throw new Error(resF.reason || `Gagal kirim foto ${i + 1}`);
+            }
+        }
         // ===== Lacak pesanan (data asli dari localStorage) =====
         function getOrders() {
             try { return JSON.parse(localStorage.getItem('printkita-orders') || '[]'); }
@@ -864,7 +925,32 @@
                 a.remove();
             };
 
-            // 1) HP (Android/iOS): share file + teks langsung ke WA
+            const submitBtn = orderForm.querySelector('button[type="submit"]');
+            const setLoading = (on, label) => {
+                if (!submitBtn) return;
+                submitBtn.disabled = on;
+                submitBtn.innerHTML = on
+                    ? '<i class="fa-solid fa-spinner animate-spin"></i> Mengirim...'
+                    : (label || '<i class="fa-solid fa-paper-plane"></i> Kirim & Proses Pesanan');
+            };
+
+            // 1) Jika token API diisi: kirim teks + foto OTOMATIS ke WA toko, tanpa share manual
+            if (FONNTE_TOKEN) {
+                setLoading(true);
+                try {
+                    await sendViaFonnte(orderId, msg, selectedFiles);
+                    setLoading(false);
+                    showFormError('');
+                    alert(`Pesanan ${orderId} terkirim otomatis ke WA toko beserta ${selectedFiles.length} foto!`);
+                    return;
+                } catch (err) {
+                    setLoading(false);
+                    showFormError('Gagal kirim via API: ' + (err.message || err) + '. Coba lagi atau pakai cara manual di bawah.');
+                    // lanjut ke fallback manual
+                }
+            }
+
+            // 2) Fallback tanpa API: Share Sheet HP (pilih WA manual) / wa.me teks saja
             if (navigator.canShare && navigator.share) {
                 try {
                     if (navigator.canShare({ files: selectedFiles })) {
@@ -876,7 +962,7 @@
                     // gagal -> lanjut fallback di bawah
                 }
             }
-            // 2) Laptop/desktop: wa.me tidak bisa bawa file, buka chat teks + user kirim foto manual
+            // 3) Laptop/desktop: wa.me tidak bisa bawa file, buka chat teks + user kirim foto manual
             openWA();
             showFormError('Chat WhatsApp terbuka tanpa foto (keterbatasan wa.me). Lanjutkan kirim ' + selectedFiles.length + ' foto manual di chat tersebut ya.');
         });
